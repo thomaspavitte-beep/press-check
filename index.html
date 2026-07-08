@@ -471,10 +471,15 @@
       // then a final step-back well past 1:1 — halftones resolve into a
       // photograph the smaller they get (stand-across-the-room effect)
       const zo=easeInOut(clamp((p-REG_A)/(0.85-REG_A),0,1));
-      const FINAL=0.5;
+      const FINAL=0.25;
       const settle=easeInOut(clamp((p-0.85)/0.13,0,1));
       zoomNow=3.2-zo*(3.2-1.1)-settle*(1.1-FINAL);
-      sheet.style.transform="scale("+zoomNow.toFixed(4)+")";
+      // the sheet scales toward its 38% origin (keeps the face framed while
+      // zoomed in); as it shrinks past 1:1 that origin lifts it up the stage,
+      // so nudge it back down by the gap between the 38% origin and centre
+      // (12% of the sheet's height) so the tiny final print sits centred
+      const recentre=Math.max(0,1-zoomNow)*(upx*UH)*0.12;
+      sheet.style.transform="translateY("+recentre.toFixed(1)+"px) scale("+zoomNow.toFixed(4)+")";
       measure();
       applyTransforms(p);
 
