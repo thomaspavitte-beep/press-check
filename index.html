@@ -100,6 +100,8 @@
   .preset{display:flex;align-items:center;gap:10px;width:100%;padding:7px 9px;border:none;background:none;
     border-radius:10px;cursor:pointer;font:inherit;font-size:13px;font-weight:600;color:var(--ink);text-align:left;}
   .preset:hover{background:var(--hover);}
+  .preset:disabled{opacity:.38;cursor:default;}
+  .preset:disabled:hover{background:none;}
   #panel hr,#createPanel hr{border:none;border-top:1px solid var(--hover);margin:10px 0;}
   .plate{padding:4px 4px 8px;}
   .plateHead{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;}
@@ -169,6 +171,7 @@
     <div class="tTip">Re-separate the picture so your inks reproduce it &mdash; Riso &amp; spot-colour style. Off = the classic CMYK dots printed in your colours.</div>
     <hr />
     <button id="anglesBtn" class="preset">Classic angles</button>
+    <button id="randAnglesBtn" class="preset">Random angles</button>
     <button id="registerBtn" class="preset">Perfect register</button>
     <button id="shakeBtn" class="preset">Shake the press</button>
     <div class="tTip">Drag the artwork to nudge the selected plate</div>
@@ -638,14 +641,29 @@
       let redrawT;
       const redrawSoon=()=>{clearTimeout(redrawT);redrawT=setTimeout(()=>{drawPlate(i);if(loupeOn)drawLoupe();},150);};
       const inkS=mkRow("Ink",0,150,100,v=>v+"%",v=>{pl.density=v/100;redrawSoon();});
-      const angS=mkRow("Angle",-45,90,pl.angle,v=>v+"°",v=>{pl.angle=v;redrawSoon();});
+      const angS=mkRow("Angle",-45,90,pl.angle,v=>v+"°",v=>{pl.angle=v;refreshAnglesBtn();redrawSoon();});
       sliders.push({ink:inkS,ang:angS,chk:chk});
       rowsEl.appendChild(box);
     });
+    // "Classic angles" only has something to do once the screens are off — so
+    // it disables itself when everything is already at the classic values
+    function refreshAnglesBtn(){
+      document.getElementById("anglesBtn").disabled=plates.every((pl,i)=>pl.angle===CLASSIC[i]);
+    }
     document.getElementById("anglesBtn").addEventListener("click",()=>{
       plates.forEach((pl,i)=>{pl.angle=CLASSIC[i];sliders[i].ang.value=CLASSIC[i];
         sliders[i].ang.dispatchEvent(new Event("input"));});
+      refreshAnglesBtn();
     });
+    // "Random angles" knocks the four screens askew — instant moiré to heal
+    document.getElementById("randAnglesBtn").addEventListener("click",()=>{
+      plates.forEach((pl,i)=>{
+        const a=Math.round(-45+Math.random()*135);
+        pl.angle=a;sliders[i].ang.value=a;sliders[i].ang.dispatchEvent(new Event("input"));
+      });
+      refreshAnglesBtn();
+    });
+    refreshAnglesBtn(); // fresh load is already classic → button starts disabled
     document.getElementById("registerBtn").addEventListener("click",()=>{
       plates.forEach(pl=>{pl.dx=0;pl.dy=0;pl.rot=0;});
       update();
