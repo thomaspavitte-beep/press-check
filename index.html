@@ -96,10 +96,10 @@
   .bcBuy:hover{text-decoration:underline;}
 
   /* popover panels: Plates + Create */
-  #panel,#createPanel{position:fixed;right:20px;bottom:64px;background:var(--surface);border:1px solid var(--border);border-radius:14px;
+  #panel,#createPanel,#exportPanel{position:fixed;right:20px;bottom:64px;background:var(--surface);border:1px solid var(--border);border-radius:14px;
     padding:12px;z-index:7;box-shadow:0 8px 28px rgba(0,0,0,.12);display:none;max-height:70vh;overflow:auto;
     width:272px;max-width:calc(100vw - 40px);}
-  #panel.open,#createPanel.open{display:block;}
+  #panel.open,#createPanel.open,#exportPanel.open{display:block;}
   .pLabel{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:4px 4px 8px;}
   .preset{display:flex;align-items:center;gap:10px;width:100%;padding:7px 9px;border:none;background:none;
     border-radius:10px;cursor:pointer;font:inherit;font-size:13px;font-weight:600;color:var(--ink);text-align:left;}
@@ -122,6 +122,15 @@
   .strip i{width:15px;height:20px;}
   .matchRow{display:flex;align-items:center;gap:8px;padding:8px 4px 2px;font-size:13px;font-weight:700;color:var(--ink);cursor:pointer;}
   .matchRow input{accent-color:var(--accent);margin:0;width:15px;height:15px;}
+  /* export options: segmented rows + a record button */
+  .segRow{display:flex;gap:6px;padding:2px 2px 8px;}
+  .segRow button{flex:1;font:inherit;font-size:12px;font-weight:600;color:var(--ink);background:var(--surface);
+    border:1px solid var(--border);border-radius:8px;padding:6px 4px;cursor:pointer;}
+  .segRow button:hover{border-color:var(--accent);}
+  .segRow button.on{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .recBtn{width:100%;font:inherit;font-size:14px;font-weight:700;color:#fff;background:var(--accent);
+    border:none;border-radius:10px;padding:9px 14px;cursor:pointer;}
+  .recBtn:hover{filter:brightness(1.06);}
   .plateHead input[type=checkbox]{accent-color:var(--accent);margin:0;}
   .tRow{display:flex;align-items:center;gap:8px;padding:2px 0 0 24px;font-size:11px;font-weight:600;color:var(--muted);}
   .tRow span{flex:0 0 38px;}
@@ -181,6 +190,24 @@
     <button id="registerBtn" class="preset">Perfect register</button>
     <button id="shakeBtn" class="preset">Shake the press</button>
     <div class="tTip">Drag the artwork to nudge the selected plate</div>
+  </div>
+
+  <div id="exportPanel">
+    <div class="pLabel">Format</div>
+    <div id="exFmt" class="segRow">
+      <button data-w="1080" data-h="1350" class="on">Portrait</button>
+      <button data-w="1080" data-h="1080">Square</button>
+      <button data-w="1080" data-h="1920">Story</button>
+    </div>
+    <div class="pLabel">Length</div>
+    <div id="exLen" class="segRow">
+      <button data-dur="8">Quick</button>
+      <button data-dur="15" class="on">Normal</button>
+      <button data-dur="24">Slow</button>
+    </div>
+    <label class="matchRow"><input type="checkbox" id="exLoop" /><span>Loop (run &amp; rewind)</span></label>
+    <hr />
+    <button id="recBtn" class="recBtn">&#9679; Record</button>
   </div>
 
   <div id="createPanel">
@@ -1008,15 +1035,26 @@
        capture, ~15s. */
     const exportBtn=document.getElementById("exportBtn");
     let exportStop=null;
+    // export settings (from the options popover)
+    let exW=1080,exH=1350,exDur=15,exLoop=false;
+
+    // draw one frame of the run into any-aspect frame; the 4:5 sheet is fitted
+    // (whole artwork kept, white margins), clipped to the paper so ink can't
+    // spill into the margins (mirrors #sheet{overflow:hidden})
     function drawExportFrame(p,ex,EW,EH){
-      const S=EW/UW; // px per sheet unit (1080/800 = 1350/1000, exact 4:5)
+      const S=Math.min(EW/UW,EH/UH);
+      const mx=(EW-S*UW)/2,my=(EH-S*UH)/2;
       ex.setTransform(1,0,0,1,0,0);
       ex.globalCompositeOperation="source-over";
       ex.fillStyle="#fff";
       ex.fillRect(0,0,EW,EH);
-      // zoom pulls from amongst the dots to the full-frame print
       const z=3.2-easeInOut(clamp((p-REG_A)/(0.85-REG_A),0,1))*(3.2-1.0);
-      const ox=EW/2,oy=EH*0.38;
+      const ox=EW/2,oy=my+0.38*S*UH;
+      // shared transform into sheet space (zoom about ox,oy → margin → scale)
+      const toSheet=()=>{
+        ex.translate(ox,oy);ex.scale(z,z);ex.translate(-ox,-oy);
+        ex.translate(mx,my);ex.scale(S,S);
+      };
       for(let i=0;i<4;i++){
         const pl=plates[i];
         if(!pl.on)continue;
@@ -1026,12 +1064,11 @@
         const dx=MISREG[i].dx*rf+pl.dx,dy=MISREG[i].dy*rf+pl.dy;
         const rot=(MISREG[i].rot*rf+pl.rot)*Math.PI/180;
         ex.save();
-        ex.translate(ox,oy);ex.scale(z,z);ex.translate(-ox,-oy);
-        ex.scale(S,S); // sheet units
+        toSheet();
+        ex.beginPath();ex.rect(0,0,UW,UH);ex.clip(); // paper: no bleed in margins
         ex.translate(UW/2+dx,UH/2+dy);
         ex.rotate(rot);
-        // clip in plate-local space so the sweep travels with the plate,
-        // exactly like the live clip-path on the canvas element
+        // sweep clip travels with the plate (the live clip-path on the canvas)
         ex.beginPath();
         ex.rect(-(UW/2+BLEED),-(UH/2+BLEED),UW+2*BLEED,sw*(UH+2*BLEED));
         ex.clip();
@@ -1039,11 +1076,11 @@
         ex.scale(1/SCALE,1/SCALE);
         ex.drawImage(pl.canvas,-(UW/2+BLEED)*SCALE,-(UH/2+BLEED)*SCALE);
         ex.restore();
-        // the roller riding this plate's sweep (sheet chrome, on top)
+        // the roller riding this plate's sweep (also clipped to the paper)
         if(sw>0&&sw<1){
           ex.save();
-          ex.translate(ox,oy);ex.scale(z,z);ex.translate(-ox,-oy);
-          ex.scale(S,S);
+          toSheet();
+          ex.beginPath();ex.rect(0,0,UW,UH);ex.clip();
           const edge=(-0.14+sw*1.28)*UH;
           const g=ex.createLinearGradient(0,edge-14,0,edge+14);
           g.addColorStop(0,pl.ink.hex+"22");
@@ -1055,12 +1092,12 @@
         }
       }
     }
-    exportBtn.addEventListener("click",()=>{
-      if(exportStop){exportStop();return;} // recording → cancel
+
+    function startRecording(){
       if(!window.MediaRecorder||!HTMLCanvasElement.prototype.captureStream){
         note("Video export isn't supported in this browser");return;
       }
-      const EW=1080,EH=1350;
+      const EW=exW,EH=exH;
       const ec=document.createElement("canvas");ec.width=EW;ec.height=EH;
       const ex=ec.getContext("2d");
       const MIMES=["video/mp4;codecs=avc1.42E01E","video/mp4",
@@ -1075,7 +1112,7 @@
       // cancel stops the recorder directly — never rely on the next rAF
       // (background tabs starve frames and would leave it recording forever)
       exportStop=()=>{cancelled=true;if(rec.state!=="inactive")rec.stop();};
-      exportBtn.textContent="Recording… ✕";
+      exportBtn.textContent="Recording 0% ✕";
       rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
       rec.onstop=()=>{
         exportStop=null;
@@ -1084,24 +1121,64 @@
         const type=rec.mimeType||mime||"video/webm";
         const ext=type.indexOf("mp4")>-1?"mp4":"webm";
         const blob=new Blob(chunks,{type:type});
-        window.__lastVideo={size:blob.size,type:type}; // verifiable hook
+        window.__lastVideo={size:blob.size,type:type,w:EW,h:EH}; // verifiable hook
         const a=document.createElement("a");
         a.href=URL.createObjectURL(blob);
         a.download="press-check."+ext;a.click();
         setTimeout(()=>URL.revokeObjectURL(a.href),5000);
         note("✓ Video saved — "+ext.toUpperCase());
       };
+      // build the p(t) timeline from the chosen length + loop
+      const scale=PRESS_END/exDur;
+      const HOLD=exLoop?0.8:1.5;
+      const REV=exLoop?exDur*0.6:0;
+      const TOTAL=exDur+HOLD+REV;
+      function pAt(t){
+        if(t<exDur)return timelineP(t*scale);
+        if(t<exDur+HOLD)return 1;
+        return timelineP(PRESS_END*(1-(t-exDur-HOLD)/REV)); // rewind to blank
+      }
       const t0=performance.now();
-      const END=PRESS_END+1.5; // hold the finished print for a beat
       function frame(){
         if(cancelled)return; // recorder already stopped by exportStop
         const t=(performance.now()-t0)/1000;
-        drawExportFrame(timelineP(Math.min(t,PRESS_END)),ex,EW,EH);
-        if(t>=END){if(rec.state!=="inactive")rec.stop();return;}
+        drawExportFrame(pAt(Math.min(t,TOTAL)),ex,EW,EH);
+        exportBtn.textContent="Recording "+Math.round(clamp(t/TOTAL,0,1)*100)+"% ✕";
+        if(t>=TOTAL){if(rec.state!=="inactive")rec.stop();return;}
         requestAnimationFrame(frame);
       }
       rec.start(200);
       requestAnimationFrame(frame);
+    }
+
+    /* export options popover */
+    const exportPanel=document.getElementById("exportPanel");
+    function seg(rowId,apply){
+      const row=document.getElementById(rowId);
+      [...row.children].forEach(b=>b.addEventListener("click",()=>{
+        [...row.children].forEach(x=>x.classList.toggle("on",x===b));
+        apply(b.dataset);
+      }));
+    }
+    seg("exFmt",d=>{exW=+d.w;exH=+d.h;});
+    seg("exLen",d=>{exDur=+d.dur;});
+    document.getElementById("exLoop").addEventListener("change",e=>{exLoop=e.target.checked;});
+    document.getElementById("recBtn").addEventListener("click",()=>{
+      exportPanel.classList.remove("open");
+      startRecording();
+    });
+    // the pill: cancel while recording, else toggle the options popover
+    // (manually registered in POPS for outside-click + mutual exclusion)
+    POPS.push({el:exportPanel,btn:exportBtn,onClose:null});
+    exportBtn.addEventListener("click",e=>{
+      e.stopPropagation();
+      if(exportStop){exportStop();return;} // recording → cancel
+      for(const q of POPS){
+        if(q.el!==exportPanel&&q.el.classList.contains("open")){
+          q.el.classList.remove("open");if(q.onClose)q.onClose();
+        }
+      }
+      exportPanel.classList.toggle("open");
     });
   }
 
