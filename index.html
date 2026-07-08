@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="theme-color" content="#fbfbf9" />
+<title>Press Check &middot; Scroll to Print</title>
+<style>
+  :root{ --ink:#111418; --bg:#fbfbf9; --accent:#e4572e; --muted:#8a9099;
+    --surface:#fff; --border:#d7dbe0; --hover:#f2f4f6; --tile:#e8ebee; }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;}
+  #track{height:700vh;position:relative;}
+  #stage{position:sticky;top:0;height:100vh;height:100svh;display:flex;align-items:center;
+    justify-content:center;overflow:hidden;}
+  @media (pointer:fine){#stage{cursor:ns-resize;}}
+
+  /* the sheet of paper: four halftone plate canvases stack on it with
+     multiply blending — ink behaves like ink. Each canvas is drawn once with
+     ~17% bleed beyond the paper so nudging a plate never runs dry; the paper
+     clips them (misregistration shifts ink on the sheet, like a real press).
+     Plate transforms + the zoom are pure GPU compositing, no redraws. */
+  #sheet{position:relative;width:min(92vw,calc(90svh * 0.8));aspect-ratio:4/5;
+    background:#fff;overflow:hidden;box-shadow:0 2px 16px rgba(17,20,24,.10);
+    transform-origin:50% 38%;}
+  #sheet canvas{position:absolute;left:-17.5%;top:-14%;width:135%;height:128%;
+    mix-blend-mode:multiply;}
+
+  #bar{position:fixed;left:0;top:0;height:3px;width:0%;background:var(--accent);z-index:5;}
+  #hud{position:fixed;left:0;right:0;top:0;padding:16px 20px;display:flex;align-items:baseline;gap:14px;pointer-events:none;z-index:4;}
+  #title{font-size:15px;font-weight:700;}
+  #title span{font-weight:400;color:var(--muted);}
+  #credit{font-size:11px;color:var(--muted);}
+  #count{margin-left:auto;font-variant-numeric:tabular-nums;font-size:14px;font-weight:600;color:var(--muted);white-space:nowrap;}
+  @media (max-width:600px){
+    #title span,#credit{display:none;}
+  }
+  #btns{position:fixed;right:20px;bottom:22px;z-index:6;display:flex;gap:8px;
+    flex-wrap:wrap;justify-content:flex-end;max-width:calc(100vw - 40px);}
+  #btns button{font:inherit;font-size:13px;font-weight:600;color:var(--ink);background:var(--surface);
+    border:1px solid var(--border);border-radius:999px;padding:7px 14px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.05);white-space:nowrap;}
+  #btns button:hover{border-color:var(--accent);color:var(--accent);}
+  @media (pointer:coarse){#loupeBtn{display:none;}} /* the loupe needs a hover cursor */
+  #intro{position:fixed;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;
+    font-size:clamp(20px,3.6vw,34px);font-weight:700;letter-spacing:-.01em;color:var(--ink);
+    padding:0 24px;pointer-events:none;z-index:4;}
+  #hint{position:fixed;left:0;right:0;bottom:26px;text-align:center;font-size:13px;color:var(--muted);transition:opacity .4s;pointer-events:none;}
+  @media (max-width:600px){
+    #hint{bottom:104px;} /* clears the wrapped pill rows */
+  }
+  #done{position:fixed;left:50%;bottom:70px;transform:translateX(-50%);background:var(--ink);color:#fff;
+    padding:9px 18px;border-radius:999px;font-size:13px;font-weight:600;opacity:0;transition:opacity .5s;pointer-events:none;z-index:5;}
+  #done.show{opacity:1;}
+  #note{position:fixed;left:50%;bottom:70px;transform:translateX(-50%);background:var(--ink);color:#fff;
+    padding:9px 18px;border-radius:999px;font-size:13px;font-weight:600;opacity:0;transition:opacity .4s;pointer-events:none;z-index:8;}
+  #note.show{opacity:1;}
+  @media (prefers-reduced-motion: reduce){
+    #done,#note,#bookCard,#hint{transition:none;}
+  }
+
+  /* printer's loupe: a lens that follows the cursor, showing the rosettes */
+  #loupe{position:fixed;width:190px;height:190px;border-radius:50%;z-index:6;display:none;
+    pointer-events:none;border:3px solid var(--ink);box-shadow:0 6px 24px rgba(0,0,0,.25),inset 0 0 0 1px rgba(255,255,255,.6);
+    overflow:hidden;background:#fff;}
+  #loupe.on{display:block;}
+  #loupe canvas{display:block;width:100%;height:100%;}
+
+  /* artworks switcher (populated from art/manifest.js) */
+  #gallery{position:fixed;right:20px;bottom:64px;background:var(--surface);border:1px solid var(--border);border-radius:14px;
+    padding:8px;z-index:7;box-shadow:0 8px 28px rgba(0,0,0,.12);display:none;max-height:60vh;overflow:auto;
+    min-width:240px;max-width:calc(100vw - 40px);}
+  #gallery.open{display:block;}
+  .galItem{display:flex;gap:10px;align-items:center;padding:7px 9px;border-radius:10px;text-decoration:none;color:var(--ink);}
+  .galItem:hover{background:var(--hover);}
+  .galItem.current{outline:2px solid var(--accent);}
+  .galCover{width:46px;height:46px;border-radius:4px;background:var(--tile);flex:0 0 auto;display:flex;
+    align-items:center;justify-content:center;font-size:15px;font-weight:700;color:var(--muted);overflow:hidden;}
+  .galCover img{width:100%;height:100%;object-fit:cover;display:block;}
+  .galTitle{font-size:13px;font-weight:700;}
+  .galBook{font-size:11px;color:var(--muted);}
+
+  /* experiment card shown at the completion moment */
+  #bookCard{position:fixed;left:50%;bottom:118px;transform:translateX(-50%);display:flex;gap:12px;align-items:center;
+    background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:10px 14px;opacity:0;transition:opacity .5s;
+    pointer-events:none;z-index:5;box-shadow:0 4px 18px rgba(0,0,0,.12);}
+  #bookCard.show{opacity:1;pointer-events:auto;}
+  #bookCard .galCover{width:60px;height:60px;font-size:18px;}
+  .bcFrom{font-size:11px;color:var(--muted);}
+  .bcBook{font-size:13px;font-weight:700;max-width:240px;}
+  .bcBuy{font-size:12px;font-weight:600;color:var(--accent);text-decoration:none;}
+  .bcBuy:hover{text-decoration:underline;}
+
+  /* popover panels: Plates + Create */
+  #panel,#createPanel{position:fixed;right:20px;bottom:64px;background:var(--surface);border:1px solid var(--border);border-radius:14px;
+    padding:12px;z-index:7;box-shadow:0 8px 28px rgba(0,0,0,.12);display:none;max-height:70vh;overflow:auto;
+    width:272px;max-width:calc(100vw - 40px);}
+  #panel.open,#createPanel.open{display:block;}
+  .pLabel{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:4px 4px 8px;}
+  .preset{display:flex;align-items:center;gap:10px;width:100%;padding:7px 9px;border:none;background:none;
+    border-radius:10px;cursor:pointer;font:inherit;font-size:13px;font-weight:600;color:var(--ink);text-align:left;}
+  .preset:hover{background:var(--hover);}
+  #panel hr,#createPanel hr{border:none;border-top:1px solid var(--hover);margin:10px 0;}
+  .plate{padding:4px 4px 8px;}
+  .plateHead{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;}
+  .plateHead input[type=radio]{accent-color:var(--accent);margin:0;}
+  .swatch{width:16px;height:16px;border-radius:4px;flex:0 0 auto;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12);}
+  .plateHead label{flex:1;cursor:pointer;}
+  .plateHead input[type=checkbox]{accent-color:var(--accent);margin:0;}
+  .tRow{display:flex;align-items:center;gap:8px;padding:2px 0 0 24px;font-size:11px;font-weight:600;color:var(--muted);}
+  .tRow span{flex:0 0 38px;}
+  .tRow input{flex:1;accent-color:var(--accent);min-width:0;}
+  .tRow b{flex:0 0 30px;text-align:right;font-variant-numeric:tabular-nums;}
+  .tTip{font-size:11px;color:var(--muted);margin:6px 4px 2px;font-weight:400;}
+  .cpHint{font-size:11px;color:var(--muted);margin:2px 4px 4px;}
+  #camBox video{display:block;width:100%;border-radius:10px;background:#000;transform:scaleX(-1);}
+  #camRow{display:flex;gap:8px;margin-top:8px;}
+  #camRow button,#msgRow button{font:inherit;font-size:13px;font-weight:600;color:var(--ink);background:var(--surface);
+    border:1px solid var(--border);border-radius:999px;padding:6px 14px;cursor:pointer;}
+  #camRow button:hover,#msgRow button:hover{border-color:var(--accent);color:var(--accent);}
+  #msgRow{display:flex;gap:8px;padding:0 2px;}
+  #msgRow input{flex:1;min-width:0;font:inherit;font-size:13px;color:var(--ink);background:var(--surface);
+    border:1px solid var(--border);border-radius:10px;padding:7px 10px;outline:none;}
+  #msgRow input:focus{border-color:var(--accent);}
+</style>
+</head>
+<body>
+  <div id="bar"></div>
+  <div id="hud">
+    <div id="title">Press Check <span>&middot; scroll to print</span></div>
+    <div id="credit">A CMYK experiment &middot; by Thomas Pavitte</div>
+    <div id="count"></div>
+  </div>
+
+  <div id="track">
+    <div id="stage">
+      <div id="sheet"></div>
+    </div>
+  </div>
+
+  <div id="btns">
+    <button id="galBtn" style="display:none">Artworks</button>
+    <button id="platesBtn">Plates</button>
+    <button id="createBtn">Create</button>
+    <button id="loupeBtn">Loupe</button>
+    <button id="printBtn">Print kit</button>
+  </div>
+  <input id="filePick" type="file" accept="image/*" hidden />
+
+  <div id="gallery"></div>
+
+  <div id="panel">
+    <div class="pLabel">Plates</div>
+    <div id="plateRows"></div>
+    <hr />
+    <button id="anglesBtn" class="preset">Classic angles</button>
+    <button id="registerBtn" class="preset">Perfect register</button>
+    <button id="shakeBtn" class="preset">Shake the press</button>
+    <div class="tTip">Drag the artwork to nudge the selected plate</div>
+  </div>
+
+  <div id="createPanel">
+    <div class="pLabel">Image</div>
+    <button id="chooseBtn" class="preset">Choose image</button>
+    <div class="cpHint">&hellip;or drop a file anywhere on the page</div>
+    <hr />
+    <div class="pLabel">Camera</div>
+    <button id="camBtn" class="preset">Take a selfie</button>
+    <div id="camBox" style="display:none">
+      <video id="camVid" autoplay playsinline muted></video>
+      <div id="camRow"><button id="snapBtn">Snap</button><button id="camCancel">Cancel</button></div>
+    </div>
+    <hr />
+    <div class="pLabel">Message</div>
+    <div id="msgRow"><input id="msgInput" type="text" maxlength="40" placeholder="Write something&hellip;" /><button id="msgBtn">Print</button></div>
+  </div>
+
+  <div id="loupe"><canvas id="loupeCanvas" width="380" height="380"></canvas></div>
+
+  <div id="intro">Every printed picture is four colours of dots</div>
+  <div id="bookCard"></div>
+  <div id="hint">Scroll to print</div>
+  <div id="done">&#10003; In register</div>
+  <div id="note"></div>
+
+<script>
+(function(){
+  if("scrollRestoration" in history) history.scrollRestoration="manual";
+  window.scrollTo(0,0);
+  window.addEventListener("load",()=>window.scrollTo(0,0));
+
+  const sheet=document.getElementById("sheet");
+  const stage=document.getElementById("stage");
+  const bar=document.getElementById("bar");
+  const count=document.getElementById("count");
+  const hint=document.getElementById("hint");
+  const done=document.getElementById("done");
+  const bookCard=document.getElementById("bookCard");
+
+  /* ---------- the press ----------
+     Four halftone plates at the classic screen angles. Each plate is a grid
+     of dots along its own rotated axis; dot area carries the channel density.
+     Overlaid at the right angles the interference becomes the printer's
+     rosette; wrong angles bloom into moiré; misregistration fringes colour at
+     every edge — all the joys and disasters of real four-colour print. */
+  const UW=800,UH=1000;          // sheet units, 4:5
+  const BLEED=140;               // ink drawn past the paper edge
+  const CUW=UW+2*BLEED,CUH=UH+2*BLEED;
+  const SCALE=1.6;               // canvas px per sheet unit
+  const PITCH=8;                 // dot grid pitch in sheet units
+  const GW=200,GH=250;           // separation sample grid
+
+  const INKS=[
+    {id:"c",name:"Cyan",   hex:"#00aeef",angle:15},
+    {id:"m",name:"Magenta",hex:"#ec008c",angle:75},
+    {id:"y",name:"Yellow", hex:"#ffe600",angle:0},
+    {id:"k",name:"Black",  hex:"#131313",angle:45}
+  ];
+  const CLASSIC=[15,75,0,45];
+  // where each plate lands during the story — a cheap-newsprint amount off
+  const MISREG=[
+    {dx:-4,dy:3,rot:-0.35},{dx:5,dy:-2,rot:0.30},
+    {dx:-3,dy:-5,rot:0.25},{dx:2,dy:4,rot:-0.30}
+  ];
+
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const easeInOut=u=>u<0.5?2*u*u:1-Math.pow(-2*u+2,2)/2;
+
+  function loadImage(url){
+    return new Promise((res,rej)=>{
+      const img=new Image();
+      img.onload=()=>res(img);
+      img.onerror=()=>rej(new Error(url+" failed to load"));
+      img.src=url;
+    });
+  }
+
+  /* sample RGB on the grid (accepts <img> or canvas), cover-cropped to 4:5,
+     with a whisper of extra contrast so the screens pop */
+  function sampleRGB(img){
+    const c=document.createElement("canvas");
+    c.width=GW;c.height=GH;
+    const ctx=c.getContext("2d",{willReadFrequently:true});
+    const ta=GW/GH;
+    let sx=0,sy=0,sw=img.width,sh=img.height;
+    if(sw/sh>ta){sw=sh*ta;sx=(img.width-sw)/2;}
+    else{sh=sw/ta;sy=(img.height-sh)/2;}
+    ctx.drawImage(img,sx,sy,sw,sh,0,0,GW,GH);
+    const d=ctx.getImageData(0,0,GW,GH).data;
+    const n=GW*GH,r=new Float32Array(n),g=new Float32Array(n),b=new Float32Array(n);
+    const pop=v=>clamp((v-0.5)*1.06+0.5,0,1);
+    for(let i=0;i<n;i++){
+      let rr=d[i*4]/255,gg=d[i*4+1]/255,bb=d[i*4+2]/255;
+      // a press-profile lift: more saturation, a touch more contrast
+      const l=(rr+gg+bb)/3;
+      r[i]=pop(l+(rr-l)*1.3);g[i]=pop(l+(gg-l)*1.3);b[i]=pop(l+(bb-l)*1.3);
+    }
+    return {r:r,g:g,b:b};
+  }
+
+  /* classic CMYK separation with full black replacement under neutrals */
+  function separate(rgb){
+    const n=GW*GH;
+    const ch=[new Float32Array(n),new Float32Array(n),new Float32Array(n),new Float32Array(n)];
+    for(let i=0;i<n;i++){
+      const r=rgb.r[i],g=rgb.g[i],b=rgb.b[i];
+      // keep black out of the midtones (light GCR) — CMY carries the colour,
+      // K arrives only for real shadows, or everything prints grey
+      const k0=1-Math.max(r,g,b);
+      const k=Math.pow(k0,1.6)*0.92;
+      ch[3][i]=k;
+      const w=1-k;
+      ch[0][i]=w>0.004?clamp((1-r-k)/w,0,1):0;
+      ch[1][i]=w>0.004?clamp((1-g-k)/w,0,1):0;
+      ch[2][i]=w>0.004?clamp((1-b-k)/w,0,1):0;
+    }
+    return ch;
+  }
+
+  function bilinear(ch,x,y){ // x,y in sheet units, clamped past the edges
+    const gx=clamp(x/(UW/GW),0,GW-1.001),gy=clamp(y/(UH/GH),0,GH-1.001);
+    const x0=gx|0,y0=gy|0,fx=gx-x0,fy=gy-y0;
+    const i=y0*GW+x0;
+    return ch[i]*(1-fx)*(1-fy)+ch[i+1]*fx*(1-fy)
+      +ch[i+GW]*(1-fx)*fy+ch[i+GW+1]*fx*fy;
+  }
+
+  /* ---------- plates ---------- */
+  // live state per plate: user nudge (dx,dy,rot), on/off, ink %, screen angle
+  const plates=INKS.map((ink,i)=>({
+    ink:ink,canvas:null,ctx:null,
+    dx:0,dy:0,rot:0,on:true,density:1,angle:ink.angle
+  }));
+  let channels=null; // 4 Float32Array separations
+  let upx=1;         // css px per sheet unit (cached on resize)
+
+  // walk the rotated dot grid for a plate; cb(cx,cy,r) in sheet units
+  function eachDot(i,cb){
+    const p=plates[i];
+    const a=p.angle*Math.PI/180;
+    const ca=Math.cos(a),sa=Math.sin(a);
+    const cxm=UW/2,cym=UH/2;
+    const R=Math.hypot(CUW,CUH)/2;
+    const range=Math.ceil(R/PITCH);
+    for(let m=-range;m<=range;m++){
+      for(let n=-range;n<=range;n++){
+        const x=cxm+(m*ca-n*sa)*PITCH;
+        const y=cym+(m*sa+n*ca)*PITCH;
+        if(x<-BLEED||x>UW+BLEED||y<-BLEED||y>UH+BLEED)continue;
+        const v=bilinear(channels[i],x,y)*p.density;
+        if(v<=0.003)continue;
+        const r=Math.min(PITCH*0.72,PITCH/2*Math.sqrt(v)*1.12);
+        cb(x,y,r);
+      }
+    }
+  }
+
+  function drawPlate(i){
+    const p=plates[i];
+    const ctx=p.ctx;
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.clearRect(0,0,p.canvas.width,p.canvas.height);
+    ctx.fillStyle=p.ink.hex;
+    ctx.beginPath();
+    eachDot(i,(x,y,r)=>{
+      const px=(x+BLEED)*SCALE,py=(y+BLEED)*SCALE;
+      ctx.moveTo(px+r*SCALE,py);
+      ctx.arc(px,py,r*SCALE,0,2*Math.PI);
+    });
+    ctx.fill();
+  }
+  function drawAll(){for(let i=0;i<4;i++)drawPlate(i);}
+
+  /* ---------- popovers ---------- */
+  const POPS=[];
+  function regPop(btn,el,onClose){
+    POPS.push({el:el,btn:btn,onClose:onClose});
+    btn.addEventListener("click",e=>{
+      e.stopPropagation();
+      for(const p of POPS){
+        if(p.el!==el&&p.el.classList.contains("open")){
+          p.el.classList.remove("open");if(p.onClose)p.onClose();
+        }
+      }
+      const was=el.classList.contains("open");
+      el.classList.toggle("open");
+      if(was&&onClose)onClose();
+    });
+  }
+  document.addEventListener("pointerdown",e=>{
+    for(const p of POPS){
+      if(p.el.classList.contains("open")&&!p.el.contains(e.target)&&e.target!==p.btn){
+        p.el.classList.remove("open");if(p.onClose)p.onClose();
+      }
+    }
+  });
+
+  /* ---------- gallery / cover tiles ---------- */
+  function coverEl(a){
+    const d=document.createElement("div");d.className="galCover";
+    function letter(){
+      let n=a.book||a.title||"?";
+      if(n.indexOf(":")>-1)n=n.slice(n.lastIndexOf(":")+1);
+      d.textContent=n.trim().replace(/^The\s+/i,"").charAt(0).toUpperCase();
+    }
+    if(a.cover){
+      const img=document.createElement("img");img.src=a.cover;img.alt="";
+      img.onerror=function(){img.remove();letter();};
+      d.appendChild(img);
+    }else letter();
+    return d;
+  }
+  const panel=document.getElementById("panel");
+  const gal=document.getElementById("gallery");
+  const createPanel=document.getElementById("createPanel");
+  function buildGallery(list,cur){
+    if(list.length<2)return;
+    list.forEach(a=>{
+      const item=document.createElement("a");
+      item.className="galItem"+(a.id===cur.id?" current":"");
+      item.href="?art="+encodeURIComponent(a.id);
+      item.appendChild(coverEl(a));
+      const tx=document.createElement("div");
+      const t1=document.createElement("div");t1.className="galTitle";t1.textContent=a.title;
+      const t2=document.createElement("div");t2.className="galBook";t2.textContent=a.book||"";
+      tx.appendChild(t1);tx.appendChild(t2);item.appendChild(tx);
+      gal.appendChild(item);
+    });
+    const btn=document.getElementById("galBtn");
+    btn.style.display="";
+    regPop(btn,gal);
+  }
+
+  /* ---------- boot ---------- */
+  async function boot(entry,list){
+    const img=await loadImage("art/"+entry.id+"/"+(entry.image||"image.jpg"));
+    channels=separate(sampleRGB(img));
+
+    for(const p of plates){
+      const c=document.createElement("canvas");
+      c.width=Math.round(CUW*SCALE);c.height=Math.round(CUH*SCALE);
+      p.canvas=c;p.ctx=c.getContext("2d");
+      sheet.appendChild(c);
+    }
+    drawAll();
+
+    // layout width ignores the zoom transform, so upx stays in sheet units
+    const measure=()=>{upx=sheet.offsetWidth/UW;};
+
+    // per-artwork HUD
+    const t=document.getElementById("title");
+    function setTitle(label){
+      t.textContent=label+" ";
+      const sp=document.createElement("span");sp.textContent="· scroll to print";
+      t.appendChild(sp);
+    }
+    setTitle(entry.title);
+    document.title=entry.title+" · Press Check";
+    done.textContent="✓ In register — four colours, one picture";
+
+    // completion card
+    bookCard.appendChild(coverEl(entry));
+    const tx=document.createElement("div");
+    const l1=document.createElement("div");l1.className="bcFrom";l1.textContent=entry.buy?"From the book":"A new experiment";
+    const l2=document.createElement("div");l2.className="bcBook";l2.textContent=entry.book||"Press Check";
+    tx.appendChild(l1);tx.appendChild(l2);
+    if(entry.buy){
+      const a=document.createElement("a");a.className="bcBuy";a.href=entry.buy;
+      a.target="_blank";a.rel="noopener";a.textContent="Get the book";
+      tx.appendChild(a);
+    }
+    bookCard.appendChild(tx);
+    bookCard.dataset.ready="1";
+
+    /* ----- the press run (all from p, rewindable) -----
+       zoomed into the dots, the plates stamp down one at a time, each a
+       little off; then they pull into register while the camera steps back
+       and the dots become a photograph */
+    const STAMP_A=0.04,STAMP_W=0.12;           // C .04-.16, M .16-.28, Y .28-.40, K .40-.52
+    const REG_A=0.55,REG_W=0.075;              // C .55-.625 ... K .775-.85
+    const NAMES=["cyan","magenta","yellow","black"];
+    let ticking=false,zoomNow=3.2,loupeOn=false,loupeX=0,loupeY=0;
+
+    function curP(){
+      const max=document.getElementById("track").offsetHeight-window.innerHeight;
+      return max>0?clamp(window.scrollY/max,0,1):0;
+    }
+
+    function applyTransforms(p){
+      for(let i=0;i<4;i++){
+        const pl=plates[i];
+        // the story's misregistration decays to zero as this plate registers
+        const rf=1-easeInOut(clamp((p-(REG_A+i*REG_W))/REG_W,0,1));
+        const dx=MISREG[i].dx*rf+pl.dx, dy=MISREG[i].dy*rf+pl.dy;
+        const rot=MISREG[i].rot*rf+pl.rot;
+        pl.canvas.style.transform="translate("+(dx*upx)+"px,"+(dy*upx)+"px) rotate("+rot+"deg)";
+        // roller sweep while this plate stamps in
+        const sw=clamp((p-(STAMP_A+i*STAMP_W))/STAMP_W,0,1);
+        pl.canvas.style.clipPath=sw>=1?"none":"inset(0 0 "+((1-sw)*100).toFixed(2)+"% 0)";
+        pl.canvas.style.opacity=pl.on?1:0;
+      }
+    }
+
+    function update(){
+      ticking=false;
+      const p=curP();
+      bar.style.width=(p*100).toFixed(2)+"%";
+      document.getElementById("intro").style.opacity=1-clamp((p-0.02)/0.05,0,1);
+
+      // zoom: in amongst the dots for the stamps, pulling back to the picture
+      const zo=easeInOut(clamp((p-REG_A)/(0.85-REG_A),0,1));
+      const settle=clamp((p-0.85)/0.10,0,1);
+      zoomNow=3.2-zo*(3.2-1.1)-settle*0.1;
+      sheet.style.transform="scale("+zoomNow.toFixed(4)+")";
+      measure();
+      applyTransforms(p);
+
+      // counter narrates the run
+      const plateIdx=clamp(Math.floor((p-STAMP_A)/STAMP_W),0,3);
+      if(p<STAMP_A)count.textContent="";
+      else if(p<STAMP_A+4*STAMP_W)count.textContent="Plate "+(plateIdx+1)+" / 4 · "+NAMES[plateIdx];
+      else if(p<REG_A)count.textContent="4 plates down";
+      else if(p<REG_A+4*REG_W){
+        const ri=clamp(Math.floor((p-REG_A)/REG_W),0,3);
+        count.textContent="Registering · "+NAMES[ri];
+      }else count.textContent="In register";
+
+      done.classList.toggle("show",p>0.88);
+      bookCard.classList.toggle("show",p>0.88&&bookCard.dataset.ready==="1");
+      if(p>0.9){
+        hint.textContent=matchMedia("(pointer:fine)").matches?"Grab a plate ↘":"Scroll back to replay ↑";
+        hint.style.opacity=1;
+      }else{
+        if(p<0.02)hint.textContent="Scroll to print";
+        hint.style.opacity=p>0.02?0:1;
+      }
+      if(loupeOn)drawLoupe();
+    }
+    const schedule=()=>{if(!ticking){ticking=true;requestAnimationFrame(update);}};
+    addEventListener("scroll",schedule,{passive:true});
+    addEventListener("resize",()=>{measure();update();});
+    measure();update();
+
+    /* ----- plates panel ----- */
+    let selected=3; // black is the classic plate to knock about
+    const rowsEl=document.getElementById("plateRows");
+    const sliders=[];
+    plates.forEach((pl,i)=>{
+      const box=document.createElement("div");box.className="plate";
+      const head=document.createElement("div");head.className="plateHead";
+      const radio=document.createElement("input");radio.type="radio";radio.name="sel";
+      radio.checked=i===selected;
+      radio.addEventListener("change",()=>{selected=i;});
+      const sw=document.createElement("span");sw.className="swatch";sw.style.background=pl.ink.hex;
+      const lab=document.createElement("label");lab.textContent=pl.ink.name;
+      lab.addEventListener("click",()=>{radio.checked=true;selected=i;});
+      const chk=document.createElement("input");chk.type="checkbox";chk.checked=true;
+      chk.title="plate on/off";
+      chk.addEventListener("change",()=>{pl.on=chk.checked;update();});
+      head.appendChild(radio);head.appendChild(sw);head.appendChild(lab);head.appendChild(chk);
+      box.appendChild(head);
+
+      const mkRow=(name,min,max,val,fmt,oninput)=>{
+        const row=document.createElement("div");row.className="tRow";
+        const s=document.createElement("span");s.textContent=name;
+        const inp=document.createElement("input");inp.type="range";
+        inp.min=min;inp.max=max;inp.value=val;
+        const b=document.createElement("b");b.textContent=fmt(val);
+        inp.addEventListener("input",()=>{b.textContent=fmt(+inp.value);oninput(+inp.value);});
+        row.appendChild(s);row.appendChild(inp);row.appendChild(b);
+        box.appendChild(row);
+        return inp;
+      };
+      let redrawT;
+      const redrawSoon=()=>{clearTimeout(redrawT);redrawT=setTimeout(()=>{drawPlate(i);if(loupeOn)drawLoupe();},150);};
+      const inkS=mkRow("Ink",0,150,100,v=>v+"%",v=>{pl.density=v/100;redrawSoon();});
+      const angS=mkRow("Angle",-45,90,pl.angle,v=>v+"°",v=>{pl.angle=v;redrawSoon();});
+      sliders.push({ink:inkS,ang:angS,chk:chk});
+      rowsEl.appendChild(box);
+    });
+    document.getElementById("anglesBtn").addEventListener("click",()=>{
+      plates.forEach((pl,i)=>{pl.angle=CLASSIC[i];sliders[i].ang.value=CLASSIC[i];
+        sliders[i].ang.dispatchEvent(new Event("input"));});
+    });
+    document.getElementById("registerBtn").addEventListener("click",()=>{
+      plates.forEach(pl=>{pl.dx=0;pl.dy=0;pl.rot=0;});
+      update();
+    });
+    document.getElementById("shakeBtn").addEventListener("click",()=>{
+      plates.forEach(pl=>{
+        pl.dx=(Math.random()-0.5)*12;pl.dy=(Math.random()-0.5)*12;
+        pl.rot=(Math.random()-0.5)*0.9;
+      });
+      update();
+    });
+    regPop(document.getElementById("platesBtn"),panel);
+
+    /* ----- drag to nudge the selected plate (fine pointers) ----- */
+    let dragging=false,lastX=0,lastY=0;
+    stage.addEventListener("pointerdown",e=>{
+      if(e.pointerType!=="mouse")return;
+      dragging=true;lastX=e.clientX;lastY=e.clientY;
+      stage.setPointerCapture(e.pointerId);
+    });
+    stage.addEventListener("pointermove",e=>{
+      if(dragging){
+        const pl=plates[selected];
+        const dx=(e.clientX-lastX)/upx/zoomNow,dy=(e.clientY-lastY)/upx/zoomNow;
+        lastX=e.clientX;lastY=e.clientY;
+        pl.dx=clamp(pl.dx+dx,-60,60);
+        pl.dy=clamp(pl.dy+dy,-60,60);
+        // a whisper of swing, like the plate pivoting under the press
+        const r=sheet.getBoundingClientRect();
+        const cx=(e.clientX-r.left)/r.width*UW,cy=(e.clientY-r.top)/r.height*UH;
+        pl.rot=clamp(pl.rot+(dx*(cy-UH/2)-dy*(cx-UW/2))*0.00002,-2,2);
+        update();
+      }
+      if(loupeOn){
+        loupeX=e.clientX;loupeY=e.clientY;
+        positionLoupe();drawLoupe();
+      }
+    });
+    const endDrag=()=>{dragging=false;};
+    stage.addEventListener("pointerup",endDrag);
+    stage.addEventListener("pointercancel",endDrag);
+
+    /* ----- printer's loupe ----- */
+    const loupe=document.getElementById("loupe");
+    const lctx=document.getElementById("loupeCanvas").getContext("2d");
+    const LSIZE=380,LPPU=6; // lens canvas px per sheet unit
+    function positionLoupe(){
+      loupe.style.left=(loupeX-95)+"px";
+      loupe.style.top=(loupeY-95)+"px";
+    }
+    function drawLoupe(){
+      const r=sheet.getBoundingClientRect();
+      const cx=(loupeX-r.left)/r.width*UW,cy=(loupeY-r.top)/r.height*UH;
+      lctx.setTransform(1,0,0,1,0,0);
+      lctx.globalCompositeOperation="source-over";
+      lctx.fillStyle="#fff";
+      lctx.fillRect(0,0,LSIZE,LSIZE);
+      if(cx<-20||cx>UW+20||cy<-20||cy>UH+20)return; // lens off the sheet
+      lctx.globalCompositeOperation="multiply";
+      const p=curP();
+      for(let i=0;i<4;i++){
+        const pl=plates[i];
+        if(!pl.on)continue;
+        const rf=1-easeInOut(clamp((p-(REG_A+i*REG_W))/REG_W,0,1));
+        const dx=MISREG[i].dx*rf+pl.dx,dy=MISREG[i].dy*rf+pl.dy;
+        const rot=(MISREG[i].rot*rf+pl.rot)*Math.PI/180;
+        lctx.setTransform(1,0,0,1,0,0);
+        lctx.translate(LSIZE/2,LSIZE/2);
+        lctx.scale(LPPU,LPPU);
+        lctx.translate(UW/2+dx-cx,UH/2+dy-cy);
+        lctx.rotate(rot);
+        lctx.translate(-UW/2-BLEED,-UH/2-BLEED);
+        lctx.scale(1/SCALE,1/SCALE);
+        lctx.drawImage(pl.canvas,0,0);
+      }
+    }
+    document.getElementById("loupeBtn").addEventListener("click",e=>{
+      loupeOn=!loupeOn;
+      loupe.classList.toggle("on",loupeOn);
+      e.target.textContent=loupeOn?"Put loupe away":"Loupe";
+      if(loupeOn){positionLoupe();drawLoupe();}
+    });
+
+    /* ----- create: image · camera · message ----- */
+    const noteEl=document.getElementById("note");
+    let noteT;
+    function note(msg){
+      noteEl.textContent=msg;
+      noteEl.classList.add("show");
+      clearTimeout(noteT);
+      noteT=setTimeout(()=>noteEl.classList.remove("show"),3000);
+    }
+    function applyArt(src,label,msg){
+      channels=separate(sampleRGB(src));
+      drawAll();
+      if(loupeOn)drawLoupe();
+      setTitle(label);
+      note(scrollY<innerHeight?msg+" — scroll to print it":msg);
+      createPanel.classList.remove("open");
+    }
+    function applyImage(file){
+      if(!file)return;
+      if(file.type&&!/^image\//.test(file.type)){note("That's not an image file");return;}
+      const url=URL.createObjectURL(file);
+      loadImage(url).then(im=>{
+        URL.revokeObjectURL(url);
+        applyArt(im,"Your image","✓ Separated into four plates");
+      }).catch(()=>{
+        URL.revokeObjectURL(url);
+        note("Couldn't read that image — try a JPG or PNG");
+      });
+    }
+    const pick=document.getElementById("filePick");
+    document.getElementById("chooseBtn").addEventListener("click",()=>pick.click());
+    pick.addEventListener("change",()=>{applyImage(pick.files[0]);pick.value="";});
+    addEventListener("dragover",e=>e.preventDefault());
+    addEventListener("drop",e=>{e.preventDefault();applyImage(e.dataTransfer.files[0]);});
+
+    const camVid=document.getElementById("camVid");
+    const camBox=document.getElementById("camBox");
+    const camBtn=document.getElementById("camBtn");
+    let camStream=null;
+    function stopCam(){
+      if(camStream){camStream.getTracks().forEach(tr=>tr.stop());camStream=null;}
+      camVid.srcObject=null;
+      camBox.style.display="none";camBtn.style.display="";
+    }
+    camBtn.addEventListener("click",()=>{
+      if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+        note("Camera not available");return;
+      }
+      navigator.mediaDevices.getUserMedia({video:{facingMode:"user"}}).then(st=>{
+        camStream=st;camVid.srcObject=st;
+        camBox.style.display="";camBtn.style.display="none";
+      }).catch(()=>note("Camera not available"));
+    });
+    document.getElementById("snapBtn").addEventListener("click",()=>{
+      if(!camVid.videoWidth){note("Camera warming up — try again");return;}
+      const c=document.createElement("canvas");
+      c.width=camVid.videoWidth;c.height=camVid.videoHeight;
+      const x=c.getContext("2d");
+      x.translate(c.width,0);x.scale(-1,1);
+      x.drawImage(camVid,0,0);
+      stopCam();
+      applyArt(c,"Your selfie","✓ Separated into four plates");
+    });
+    document.getElementById("camCancel").addEventListener("click",stopCam);
+    regPop(document.getElementById("createBtn"),createPanel,stopCam);
+
+    // message: words set in loud ink colours so the separation is the show
+    const MSGCOLS=["#ec008c","#00aeef","#f5a300","#131313"];
+    function textArt(str){
+      const c=document.createElement("canvas");c.width=400;c.height=500;
+      const x=c.getContext("2d");
+      x.fillStyle="#fff";x.fillRect(0,0,400,500);
+      x.textAlign="center";x.textBaseline="middle";
+      const words=str.trim().split(/\s+/);
+      const font=s=>"800 "+s+"px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif";
+      function fits(size){
+        x.font=font(size);
+        const lines=[];let cur="";
+        for(const w of words){
+          if(x.measureText(w).width>360)return null;
+          const t2=cur?cur+" "+w:w;
+          if(x.measureText(t2).width<=360)cur=t2;
+          else{lines.push(cur);cur=w;}
+        }
+        lines.push(cur);
+        return lines.length*size*1.12<=440?lines:null;
+      }
+      let size=216,lines=null;
+      for(;size>=24;size-=6){lines=fits(size);if(lines)break;}
+      if(!lines){x.font=font(24);lines=[str.trim().slice(0,20)];size=24;}
+      const lh=size*1.12,y0=250-(lines.length-1)*lh/2;
+      lines.forEach((ln,li)=>{
+        // colour word by word within the line
+        const ws=ln.split(" ");
+        let totalW=x.measureText(ln).width;
+        let cxp=200-totalW/2;
+        ws.forEach((w,wi)=>{
+          const wW=x.measureText(w).width;
+          x.fillStyle=MSGCOLS[(li+wi)%MSGCOLS.length];
+          x.textAlign="left";
+          x.fillText(w,cxp,y0+li*lh);
+          cxp+=wW+x.measureText(" ").width;
+        });
+        x.textAlign="center";
+      });
+      return c;
+    }
+    const msgInput=document.getElementById("msgInput");
+    function applyMsg(){
+      const v=msgInput.value.trim();
+      if(!v)return;
+      applyArt(textArt(v),"Your message","✓ Message on the press");
+    }
+    document.getElementById("msgBtn").addEventListener("click",applyMsg);
+    msgInput.addEventListener("keydown",e=>{if(e.key==="Enter")applyMsg();});
+
+    /* ----- print kit: the four separations, ready for acetate ----- */
+    function download(name,text){
+      const a=document.createElement("a");
+      a.href=URL.createObjectURL(new Blob([text],{type:"image/svg+xml"}));
+      a.download=name;a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+    }
+    function plateSVG(i){
+      const pl=plates[i];
+      let dots="";
+      eachDot(i,(x,y,r)=>{
+        if(x<-r||x>UW+r||y<-r||y>UH+r)return; // paper only
+        dots+='<circle cx="'+x.toFixed(2)+'" cy="'+y.toFixed(2)+'" r="'+r.toFixed(2)+'"/>';
+      });
+      // registration crosses — identical on every plate, that's their job
+      const marks=[[40,40],[UW-40,40],[40,UH-40],[UW-40,UH-40]]
+        .map(m=>'<path d="M'+(m[0]-14)+' '+m[1]+'H'+(m[0]+14)+'M'+m[0]+' '+(m[1]-14)+'V'+(m[1]+14)+'"/>'
+          +'<circle cx="'+m[0]+'" cy="'+m[1]+'" r="8" fill="none"/>').join("");
+      return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+UW+' '+UH+'" width="160mm" height="200mm">\n'
+        +'<!-- Press Check · '+pl.ink.name.toUpperCase()+' plate · screen '+pl.angle+'° — print on clear acetate, stack all four by the crosses -->\n'
+        +'<g fill="'+pl.ink.hex+'">'+dots+'</g>\n'
+        +'<g stroke="#131313" stroke-width="1.5" fill="none">'+marks+'</g>\n'
+        +'<text x="'+(UW/2)+'" y="'+(UH-14)+'" text-anchor="middle" font-family="Helvetica,Arial" font-size="14" fill="#131313">'
+        +pl.ink.name.toUpperCase()+' · '+pl.angle+'&#176;</text>\n</svg>';
+    }
+    document.getElementById("printBtn").addEventListener("click",()=>{
+      plates.forEach((pl,i)=>{
+        setTimeout(()=>download("press-check-"+pl.ink.id+"-plate.svg",plateSVG(i)),i*450);
+      });
+    });
+  }
+
+  /* ---------- manifest + start ---------- */
+  const FALLBACK=[{id:"vangogh",title:"Vincent",book:"Press Check"}];
+  function start(list){
+    const param=(new URLSearchParams(location.search).get("art")||"").toLowerCase();
+    const entry=(/^[a-z0-9-]+$/.test(param)&&list.find(a=>a.id===param))||list[0];
+    buildGallery(list,entry);
+    boot(entry,list).catch(err=>{
+      console.error(err);
+      count.textContent="Couldn't load artwork";
+    });
+  }
+  const s=document.createElement("script");
+  s.src="art/manifest.js";
+  s.onload=()=>start(Array.isArray(window.PRESS_MANIFEST)&&window.PRESS_MANIFEST.length?window.PRESS_MANIFEST:FALLBACK);
+  s.onerror=()=>start(FALLBACK);
+  document.head.appendChild(s);
+})();
+</script>
+</body>
+</html>
