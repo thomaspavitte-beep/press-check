@@ -26,6 +26,10 @@
     transform-origin:50% 38%;}
   #sheet canvas{position:absolute;left:-17.5%;top:-14%;width:135%;height:128%;
     mix-blend-mode:multiply;}
+  /* the press roller: an ink-tinted bar that sweeps the sheet as each plate
+     stamps — pure chrome, driven from scroll progress in update() */
+  #roller{position:absolute;left:0;right:0;top:0;height:2.5%;z-index:2;opacity:0;
+    pointer-events:none;transform:translateY(-50%);transition:opacity .25s;}
 
   #bar{position:fixed;left:0;top:0;height:3px;width:0%;background:var(--accent);z-index:5;}
   #hud{position:fixed;left:0;right:0;top:0;padding:16px 20px;display:flex;align-items:baseline;gap:14px;pointer-events:none;z-index:4;}
@@ -146,12 +150,13 @@
 
   <div id="track">
     <div id="stage">
-      <div id="sheet"></div>
+      <div id="sheet"><div id="roller"></div></div>
     </div>
   </div>
 
   <div id="btns">
     <button id="galBtn" style="display:none">Artworks</button>
+    <button id="runBtn">Run the press</button>
     <button id="platesBtn">Plates</button>
     <button id="createBtn">Create</button>
     <button id="loupeBtn">Loupe</button>
@@ -478,6 +483,7 @@
     lastRGB=sampleRGB(img);
     channels=separateNow(lastRGB);
 
+    const roller=document.getElementById("roller");
     for(const p of plates){
       const c=document.createElement("canvas");
       c.width=Math.round(CUW*SCALE);c.height=Math.round(CUH*SCALE);
@@ -565,6 +571,23 @@
       measure();
       applyTransforms(p);
 
+      // the roller sweeps the sheet with whichever plate is stamping.
+      // The canvas clip reveals top-down over the canvas box (which bleeds
+      // 14% past the sheet), so map the reveal edge into sheet space.
+      let rolling=false;
+      for(let i=0;i<4;i++){
+        const sw=(p-(STAMP_A+i*STAMP_W))/STAMP_W;
+        if(sw>0&&sw<1){
+          const hex=plates[i].ink.hex;
+          roller.style.top=clamp(-14+sw*128,-2,100)+"%";
+          roller.style.background=
+            "linear-gradient(180deg,"+hex+"22 0%,"+hex+"55 55%,rgba(0,0,0,.30) 100%)";
+          rolling=true;
+          break;
+        }
+      }
+      roller.style.opacity=rolling?1:0;
+
       // counter narrates the run
       const plateIdx=clamp(Math.floor((p-STAMP_A)/STAMP_W),0,3);
       if(p<STAMP_A)count.textContent="";
@@ -590,6 +613,57 @@
     addEventListener("scroll",schedule,{passive:true});
     addEventListener("resize",()=>{measure();update();});
     measure();update();
+
+    /* ----- run the press: the whole story plays itself -----
+       Drives the REAL scroll position (one source of truth), with a press
+       cadence — each plate sweeps in, then a beat of dwell before the next.
+       Any scroll input from the user stops the machine and hands over. */
+    const runBtn=document.getElementById("runBtn");
+    const PRESS_KEYS=[[0,0],[0.6,.03],[0.9,.05],[2.0,.16],[2.5,.17],
+      [3.4,.28],[3.9,.29],[4.8,.40],[5.3,.41],[6.2,.52],[6.7,.54],
+      [7.4,.55],[10.9,.85],[13.2,1]];
+    const PRESS_END=PRESS_KEYS[PRESS_KEYS.length-1][0];
+    const smooth=u=>u*u*(3-2*u);
+    function timelineP(t){
+      if(t<=0)return 0;
+      for(let i=1;i<PRESS_KEYS.length;i++){
+        if(t<=PRESS_KEYS[i][0]){
+          const k0=PRESS_KEYS[i-1],k1=PRESS_KEYS[i];
+          return k0[1]+(k1[1]-k0[1])*smooth((t-k0[0])/(k1[0]-k0[0]));
+        }
+      }
+      return 1;
+    }
+    let pressing=false,pressT0=0,pressRAF=0;
+    function stopPress(){
+      if(!pressing)return;
+      pressing=false;
+      cancelAnimationFrame(pressRAF);
+      runBtn.textContent="Run the press";
+    }
+    function pressLoop(ts){
+      if(!pressing)return;
+      const t=(ts-pressT0)/1000;
+      const max=document.getElementById("track").offsetHeight-window.innerHeight;
+      window.scrollTo(0,timelineP(t)*max);
+      update();
+      if(t>=PRESS_END){stopPress();return;}
+      pressRAF=requestAnimationFrame(pressLoop);
+    }
+    runBtn.addEventListener("click",()=>{
+      if(pressing){stopPress();return;}
+      pressing=true;
+      runBtn.textContent="Stop the press";
+      window.scrollTo(0,0);
+      pressT0=performance.now();
+      pressRAF=requestAnimationFrame(pressLoop);
+    });
+    // the user grabbing the page always wins
+    addEventListener("wheel",stopPress,{passive:true});
+    addEventListener("touchmove",stopPress,{passive:true});
+    addEventListener("keydown",e=>{
+      if(["ArrowUp","ArrowDown","PageUp","PageDown"," ","Home","End"].indexOf(e.key)>-1)stopPress();
+    });
 
     /* ----- plates panel ----- */
     let selected=3; // black is the classic plate to knock about
