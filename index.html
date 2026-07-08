@@ -331,10 +331,13 @@
   }
   function drawAll(){for(let i=0;i<4;i++)drawPlate(i);}
 
-  /* ---------- popovers ---------- */
+  /* ---------- popovers ----------
+     sticky panels (Plates) stay open through clicks on the artwork — you nudge
+     a plate, pick another, keep going — and only close when you click their own
+     pill again or open a different panel. Non-sticky ones close on outside click. */
   const POPS=[];
-  function regPop(btn,el,onClose){
-    POPS.push({el:el,btn:btn,onClose:onClose});
+  function regPop(btn,el,onClose,sticky){
+    POPS.push({el:el,btn:btn,onClose:onClose,sticky:sticky});
     btn.addEventListener("click",e=>{
       e.stopPropagation();
       for(const p of POPS){
@@ -349,6 +352,7 @@
   }
   document.addEventListener("pointerdown",e=>{
     for(const p of POPS){
+      if(p.sticky)continue;
       if(p.el.classList.contains("open")&&!p.el.contains(e.target)&&e.target!==p.btn){
         p.el.classList.remove("open");if(p.onClose)p.onClose();
       }
@@ -561,7 +565,7 @@
       });
       update();
     });
-    regPop(document.getElementById("platesBtn"),panel);
+    regPop(document.getElementById("platesBtn"),panel,null,true); // sticky — stays open while you nudge plates
 
     /* ----- drag to nudge the selected plate (fine pointers) ----- */
     let dragging=false,lastX=0,lastY=0;
