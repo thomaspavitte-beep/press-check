@@ -114,6 +114,8 @@
   /* ink-set preset strips */
   .strip{display:flex;border-radius:5px;overflow:hidden;flex:0 0 auto;box-shadow:inset 0 0 0 1px rgba(0,0,0,.10);}
   .strip i{width:15px;height:20px;}
+  .matchRow{display:flex;align-items:center;gap:8px;padding:8px 4px 2px;font-size:13px;font-weight:700;color:var(--ink);cursor:pointer;}
+  .matchRow input{accent-color:var(--accent);margin:0;width:15px;height:15px;}
   .plateHead input[type=checkbox]{accent-color:var(--accent);margin:0;}
   .tRow{display:flex;align-items:center;gap:8px;padding:2px 0 0 24px;font-size:11px;font-weight:600;color:var(--muted);}
   .tRow span{flex:0 0 38px;}
@@ -163,6 +165,8 @@
     <hr />
     <div class="pLabel">Ink sets</div>
     <div id="inkSets"></div>
+    <label class="matchRow"><input type="checkbox" id="matchInks" /><span>Match my inks</span></label>
+    <div class="tTip">Re-separate the picture so your inks reproduce it &mdash; Riso &amp; spot-colour style. Off = the classic CMYK dots printed in your colours.</div>
     <hr />
     <button id="anglesBtn" class="preset">Classic angles</button>
     <button id="registerBtn" class="preset">Perfect register</button>
@@ -300,6 +304,51 @@
     return ch;
   }
 
+  function hexRGB(hex){const n=parseInt(hex.slice(1),16);
+    return [(n>>16&255)/255,(n>>8&255)/255,(n&255)/255];}
+
+  /* "match my inks" separation — solve, per pixel, the dot coverages that make
+     THESE four inks reproduce the picture, instead of printing the fixed CMYK
+     dots in the wrong colours. Forward model matches how the plates actually
+     composite: a plate at coverage a over paper has average transmittance
+     (1 - a·(1-ink)) per channel, and independent overprints multiply, so
+     observed = ∏(1 - a_i·(1-ink_i)). We invert it by coordinate descent —
+     each ink's coverage has a closed-form 1-D least-squares solution given the
+     others — warm-started from the standard separation. A few sweeps converge.
+     Limited-gamut ink sets (Riso, duotone) reproduce what they can and
+     gracefully approximate the rest — exactly like a real spot-colour job. */
+  function separateMatched(rgb,inks){
+    const n=GW*GH;
+    const ch=[new Float32Array(n),new Float32Array(n),new Float32Array(n),new Float32Array(n)];
+    const absb=inks.map(ik=>[1-ik[0],1-ik[1],1-ik[2]]); // how much each ink darkens, per channel
+    const std=separate(rgb);
+    const a=[0,0,0,0];
+    for(let px=0;px<n;px++){
+      a[0]=std[0][px];a[1]=std[1][px];a[2]=std[2][px];a[3]=std[3][px];
+      const t0=rgb.r[px],t1=rgb.g[px],t2=rgb.b[px];
+      for(let s=0;s<5;s++){
+        for(let i=0;i<4;i++){
+          let num=0,den=0;
+          for(let cc=0;cc<3;cc++){
+            let B=1;
+            for(let j=0;j<4;j++)if(j!==i)B*=1-a[j]*absb[j][cc];
+            const u=B*absb[i][cc];
+            const r=B-(cc===0?t0:cc===1?t1:t2);
+            num+=r*u;den+=u*u;
+          }
+          const ai=den>1e-6?num/den:0;
+          a[i]=ai<0?0:ai>1?1:ai;
+        }
+      }
+      ch[0][px]=a[0];ch[1][px]=a[1];ch[2][px]=a[2];ch[3][px]=a[3];
+    }
+    return ch;
+  }
+  // choose the separation for the current mode; matchInks reads live ink colours
+  function separateNow(rgb){
+    return matchInks?separateMatched(rgb,plates.map(p=>hexRGB(p.ink.hex))):separate(rgb);
+  }
+
   function bilinear(ch,x,y){ // x,y in sheet units, clamped past the edges
     const gx=clamp(x/(UW/GW),0,GW-1.001),gy=clamp(y/(UH/GH),0,GH-1.001);
     const x0=gx|0,y0=gy|0,fx=gx-x0,fy=gy-y0;
@@ -315,6 +364,8 @@
     dx:0,dy:0,rot:0,on:true,density:1,angle:ink.angle
   }));
   let channels=null; // 4 Float32Array separations
+  let lastRGB=null;  // the sampled source, kept so we can re-separate on ink change
+  let matchInks=false; // false = fixed CMYK dots (false colour); true = re-separate for the inks
   let upx=1;         // css px per sheet unit (cached on resize)
 
   // walk the rotated dot grid for a plate; cb(cx,cy,r) in sheet units
@@ -421,7 +472,8 @@
   /* ---------- boot ---------- */
   async function boot(entry,list){
     const img=await loadImage("art/"+entry.id+"/"+(entry.image||"image.jpg"));
-    channels=separate(sampleRGB(img));
+    lastRGB=sampleRGB(img);
+    channels=separateNow(lastRGB);
 
     for(const p of plates){
       const c=document.createElement("canvas");
@@ -541,6 +593,14 @@
     const rowsEl=document.getElementById("plateRows");
     const sliders=[];
     const swatches=[];
+    // re-solve the separation for the current inks (debounced, since dragging
+    // the colour picker fires rapidly); a no-op cost when matchInks is off
+    let sepT;
+    function reseparate(now){
+      clearTimeout(sepT);
+      const run=()=>{channels=separateNow(lastRGB);drawAll();if(loupeOn)drawLoupe();};
+      if(now)run();else sepT=setTimeout(run,180);
+    }
     plates.forEach((pl,i)=>{
       const box=document.createElement("div");box.className="plate";
       const head=document.createElement("div");head.className="plateHead";
@@ -550,7 +610,11 @@
       // the swatch is a live colour picker — recolour this plate's ink
       const sw=document.createElement("input");sw.type="color";sw.className="swatch";
       sw.value=pl.ink.hex;sw.title="ink colour";
-      sw.addEventListener("input",()=>{pl.ink.hex=sw.value;drawPlate(i);if(loupeOn)drawLoupe();});
+      sw.addEventListener("input",()=>{
+        pl.ink.hex=sw.value;
+        if(matchInks)reseparate();                  // re-solve coverages for the new ink
+        else{drawPlate(i);if(loupeOn)drawLoupe();}   // false-colour: just recolour
+      });
       swatches.push(sw);
       const lab=document.createElement("label");lab.textContent=pl.ink.name;
       lab.addEventListener("click",()=>{radio.checked=true;selected=i;});
@@ -602,10 +666,15 @@
         swatches[i].value=hex;
         if(set.on){plates[i].on=set.on[i];sliders[i].chk.checked=set.on[i];}
       });
-      drawAll();
-      update();               // reflect any on/off change
-      if(loupeOn)drawLoupe();
+      if(matchInks)reseparate(true);        // re-solve for the new inks
+      else{drawAll();if(loupeOn)drawLoupe();} // false-colour: recolour only
+      update();                              // reflect any on/off change
     }
+    document.getElementById("matchInks").addEventListener("change",e=>{
+      matchInks=e.target.checked;
+      note(matchInks?"Re-separating for your inks…":"Back to CMYK dots");
+      setTimeout(()=>reseparate(true),20); // let the note paint before the solve
+    });
     const inkSetsEl=document.getElementById("inkSets");
     for(const set of INKSETS){
       const b=document.createElement("button");b.className="preset";
@@ -698,7 +767,8 @@
       noteT=setTimeout(()=>noteEl.classList.remove("show"),3000);
     }
     function applyArt(src,label,msg){
-      channels=separate(sampleRGB(src));
+      lastRGB=sampleRGB(src);
+      channels=separateNow(lastRGB); // honours matchInks + current inks
       drawAll();
       if(loupeOn)drawLoupe();
       setTitle(label);
