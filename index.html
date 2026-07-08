@@ -104,8 +104,16 @@
   .plate{padding:4px 4px 8px;}
   .plateHead{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;}
   .plateHead input[type=radio]{accent-color:var(--accent);margin:0;}
-  .swatch{width:16px;height:16px;border-radius:4px;flex:0 0 auto;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12);}
+  /* the plate swatch is a live colour picker — click it to change the ink */
+  input.swatch{width:18px;height:18px;border-radius:4px;flex:0 0 auto;padding:0;cursor:pointer;
+    -webkit-appearance:none;appearance:none;border:none;background:none;box-shadow:inset 0 0 0 1px rgba(0,0,0,.18);}
+  input.swatch::-webkit-color-swatch-wrapper{padding:0;}
+  input.swatch::-webkit-color-swatch{border:none;border-radius:4px;}
+  input.swatch::-moz-color-swatch{border:none;border-radius:4px;}
   .plateHead label{flex:1;cursor:pointer;}
+  /* ink-set preset strips */
+  .strip{display:flex;border-radius:5px;overflow:hidden;flex:0 0 auto;box-shadow:inset 0 0 0 1px rgba(0,0,0,.10);}
+  .strip i{width:15px;height:20px;}
   .plateHead input[type=checkbox]{accent-color:var(--accent);margin:0;}
   .tRow{display:flex;align-items:center;gap:8px;padding:2px 0 0 24px;font-size:11px;font-weight:600;color:var(--muted);}
   .tRow span{flex:0 0 38px;}
@@ -152,6 +160,9 @@
   <div id="panel">
     <div class="pLabel">Plates</div>
     <div id="plateRows"></div>
+    <hr />
+    <div class="pLabel">Ink sets</div>
+    <div id="inkSets"></div>
     <hr />
     <button id="anglesBtn" class="preset">Classic angles</button>
     <button id="registerBtn" class="preset">Perfect register</button>
@@ -217,6 +228,18 @@
     {id:"k",name:"Black",  hex:"#131313",angle:45}
   ];
   const CLASSIC=[15,75,0,45];
+  // ink-set presets — recolour the four plates (the separation is unchanged,
+  // so the same dot patterns just print in different inks: faithful CMYK, or
+  // gloriously "wrong" false-colour / Riso / duotone). Order is C/M/Y/K plate.
+  // An optional `on` array toggles plates too (for duotone-style sets).
+  const INKSETS=[
+    {name:"CMYK",     inks:["#00aeef","#ec008c","#ffe600","#131313"],on:[true,true,true,true]},
+    {name:"Riso",     inks:["#0078bf","#ff48b0","#ffe800","#2b2b2b"]},
+    {name:"Newsprint",inks:["#3f8fb0","#c0608f","#e6d566","#2a2622"]},
+    {name:"Sunset",   inks:["#ff5e5b","#ff9e2c","#8a4fd0","#2b1a3a"]},
+    {name:"Neon",     inks:["#00e5ff","#ff2079","#eaff00","#12121a"]},
+    {name:"Cyanotype",inks:["#1b4f72","#2e86c1","#5dade2","#0a1a2a"],on:[true,false,false,true]}
+  ];
   // where each plate lands during the story — a cheap-newsprint amount off
   const MISREG=[
     {dx:-4,dy:3,rot:-0.35},{dx:5,dy:-2,rot:0.30},
@@ -517,13 +540,18 @@
     let selected=3; // black is the classic plate to knock about
     const rowsEl=document.getElementById("plateRows");
     const sliders=[];
+    const swatches=[];
     plates.forEach((pl,i)=>{
       const box=document.createElement("div");box.className="plate";
       const head=document.createElement("div");head.className="plateHead";
       const radio=document.createElement("input");radio.type="radio";radio.name="sel";
       radio.checked=i===selected;
       radio.addEventListener("change",()=>{selected=i;});
-      const sw=document.createElement("span");sw.className="swatch";sw.style.background=pl.ink.hex;
+      // the swatch is a live colour picker — recolour this plate's ink
+      const sw=document.createElement("input");sw.type="color";sw.className="swatch";
+      sw.value=pl.ink.hex;sw.title="ink colour";
+      sw.addEventListener("input",()=>{pl.ink.hex=sw.value;drawPlate(i);if(loupeOn)drawLoupe();});
+      swatches.push(sw);
       const lab=document.createElement("label");lab.textContent=pl.ink.name;
       lab.addEventListener("click",()=>{radio.checked=true;selected=i;});
       const chk=document.createElement("input");chk.type="checkbox";chk.checked=true;
@@ -565,6 +593,29 @@
       });
       update();
     });
+
+    // ink sets: recolour all four plates at once (and toggle them, if the set
+    // says so). Same dots, new inks — CMYK stays faithful, the rest go wild.
+    function applyInkSet(set){
+      set.inks.forEach((hex,i)=>{
+        plates[i].ink.hex=hex;
+        swatches[i].value=hex;
+        if(set.on){plates[i].on=set.on[i];sliders[i].chk.checked=set.on[i];}
+      });
+      drawAll();
+      update();               // reflect any on/off change
+      if(loupeOn)drawLoupe();
+    }
+    const inkSetsEl=document.getElementById("inkSets");
+    for(const set of INKSETS){
+      const b=document.createElement("button");b.className="preset";
+      const strip=document.createElement("span");strip.className="strip";
+      set.inks.forEach(hex=>{const ii=document.createElement("i");ii.style.background=hex;strip.appendChild(ii);});
+      b.appendChild(strip);
+      b.appendChild(document.createTextNode(set.name));
+      b.addEventListener("click",()=>applyInkSet(set));
+      inkSetsEl.appendChild(b);
+    }
     regPop(document.getElementById("platesBtn"),panel,null,true); // sticky — stays open while you nudge plates
 
     /* ----- drag to nudge the selected plate (fine pointers) ----- */
