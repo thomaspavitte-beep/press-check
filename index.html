@@ -272,6 +272,8 @@
   const UW=800,UH=1000;          // sheet units, 4:5
   const BLEED=140;               // ink drawn past the paper edge
   const CUW=UW+2*BLEED,CUH=UH+2*BLEED;
+  // the paper rectangle inside the bleed-extended canvas, as clip-path inset %s
+  const INS_H=BLEED/CUW*100, INS_V=BLEED/CUH*100, PAP_H=UH/CUH*100;
   const SCALE=1.6;               // canvas px per sheet unit
   const PITCH=8;                 // dot grid pitch in sheet units
   const GW=200,GH=250;           // separation sample grid
@@ -599,7 +601,15 @@
           +"translate("+(dx*upx)+"px,"+(dy*upx)+"px) rotate("+rot+"deg)";
         // roller sweep while this plate stamps in
         const sw=clamp((p-(STAMP_A+i*STAMP_W))/STAMP_W,0,1);
-        pl.canvas.style.clipPath=sw>=1?"none":"inset(0 0 "+((1-sw)*100).toFixed(2)+"% 0)";
+        if(sepOn||spread>0.001){
+          // in Separate mode the sheet stops clipping the bleed (overflow
+          // visible), so clip each plate to the paper edge (combined with the
+          // sweep) — otherwise the bleed shows as a border of uniform dots
+          const bottom=(100-INS_V-sw*PAP_H).toFixed(3);
+          pl.canvas.style.clipPath="inset("+INS_V.toFixed(3)+"% "+INS_H.toFixed(3)+"% "+bottom+"% "+INS_H.toFixed(3)+"%)";
+        }else{
+          pl.canvas.style.clipPath=sw>=1?"none":"inset(0 0 "+((1-sw)*100).toFixed(2)+"% 0)";
+        }
         pl.canvas.style.opacity=pl.on?1:0;
         // name tags fade in near full spread
         tags[i].style.transform="translate(calc(-50% + "+tx.toFixed(1)+"px),0)";
