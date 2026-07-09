@@ -46,7 +46,7 @@
   #spreadWrap input{width:min(300px,46vw);accent-color:var(--accent);margin:0;}
   #spreadWrap span{font-size:11px;font-weight:600;color:var(--muted);}
   @media (max-width:600px){
-    #spreadWrap{bottom:170px;}
+    #spreadWrap{bottom:150px;}
   }
 
   #bar{position:fixed;left:0;top:0;height:3px;width:0%;background:var(--accent);z-index:5;}
@@ -64,12 +64,17 @@
     border:1px solid var(--border);border-radius:999px;padding:7px 14px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.05);white-space:nowrap;}
   #btns button:hover{border-color:var(--accent);color:var(--accent);}
   @media (pointer:coarse){#loupeBtn{display:none;}} /* the loupe needs a hover cursor */
+  @media (max-width:600px){
+    /* tidy: drop the file-export pills, centre what's left */
+    #printBtn,#exportBtn{display:none;}
+    #btns{left:0;right:0;justify-content:center;max-width:100vw;padding:0 10px;}
+  }
   #intro{position:fixed;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;
     font-size:clamp(20px,3.6vw,34px);font-weight:700;letter-spacing:-.01em;color:var(--ink);
     padding:0 24px;pointer-events:none;z-index:4;}
   #hint{position:fixed;left:0;right:0;bottom:26px;text-align:center;font-size:13px;color:var(--muted);transition:opacity .4s;pointer-events:none;}
   @media (max-width:600px){
-    #hint{bottom:156px;} /* clears the wrapped pill rows (3 rows now) */
+    #hint{bottom:110px;} /* clears the centred pill rows (2 rows on mobile) */
   }
   #done{position:fixed;left:50%;bottom:70px;transform:translateX(-50%);background:var(--ink);color:#fff;
     padding:9px 18px;border-radius:999px;font-size:13px;font-weight:600;opacity:0;transition:opacity .5s;pointer-events:none;z-index:5;}
@@ -119,6 +124,14 @@
     width:272px;max-width:calc(100vw - 40px);}
   #panel.open,#createPanel.open,#exportPanel.open{display:block;}
   .pLabel{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:4px 4px 8px;}
+  /* sticky header for the Plates panel — carries a close button since the
+     panel is sticky and won't dismiss on outside click */
+  .panelHead{position:sticky;top:-12px;display:flex;align-items:center;justify-content:space-between;
+    background:var(--surface);margin:-12px -12px 6px;padding:12px 12px 6px;border-radius:14px 14px 0 0;z-index:2;}
+  .panelHead .pLabel{margin:0;}
+  .panelClose{border:none;background:none;cursor:pointer;color:var(--muted);font-size:15px;line-height:1;
+    padding:3px 6px;border-radius:7px;}
+  .panelClose:hover{color:var(--ink);background:var(--hover);}
   .preset{display:flex;align-items:center;gap:10px;width:100%;padding:7px 9px;border:none;background:none;
     border-radius:10px;cursor:pointer;font:inherit;font-size:13px;font-weight:600;color:var(--ink);text-align:left;}
   .preset:hover{background:var(--hover);}
@@ -198,7 +211,7 @@
   <div id="gallery"></div>
 
   <div id="panel">
-    <div class="pLabel">Plates</div>
+    <div class="panelHead"><span class="pLabel">Plates</span><button id="panelClose" class="panelClose" title="Close" aria-label="Close">&#10005;</button></div>
     <div id="plateRows"></div>
     <hr />
     <div class="pLabel">Ink sets</div>
@@ -852,6 +865,7 @@
       inkSetsEl.appendChild(b);
     }
     regPop(document.getElementById("platesBtn"),panel,null,true); // sticky — stays open while you nudge plates
+    document.getElementById("panelClose").addEventListener("click",()=>panel.classList.remove("open"));
 
     /* ----- drag to nudge the selected plate (fine pointers) ----- */
     let dragging=false,lastX=0,lastY=0;
