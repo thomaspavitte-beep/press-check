@@ -34,7 +34,6 @@
   /* separate: the plates fan out into a labelled row; the sheet stops
      clipping so they can leave the paper, and the completion chrome bows out */
   body.spread #sheet{overflow:visible;}
-  body.spread #done,body.spread #bookCard{opacity:0 !important;}
   .plateTag{position:absolute;left:50%;top:66%;transform:translateX(-50%);opacity:0;
     font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--muted);
     display:flex;align-items:center;gap:5px;pointer-events:none;z-index:3;white-space:nowrap;}
@@ -76,14 +75,11 @@
   @media (max-width:600px){
     #hint{bottom:110px;} /* clears the centred pill rows (2 rows on mobile) */
   }
-  #done{position:fixed;left:50%;bottom:70px;transform:translateX(-50%);background:var(--ink);color:#fff;
-    padding:9px 18px;border-radius:999px;font-size:13px;font-weight:600;opacity:0;transition:opacity .5s;pointer-events:none;z-index:5;}
-  #done.show{opacity:1;}
   #note{position:fixed;left:50%;bottom:70px;transform:translateX(-50%);background:var(--ink);color:#fff;
     padding:9px 18px;border-radius:999px;font-size:13px;font-weight:600;opacity:0;transition:opacity .4s;pointer-events:none;z-index:8;}
   #note.show{opacity:1;}
   @media (prefers-reduced-motion: reduce){
-    #done,#note,#bookCard,#hint{transition:none;}
+    #note,#hint{transition:none;}
   }
 
   /* printer's loupe: a lens that follows the cursor, showing the rosettes */
@@ -106,17 +102,6 @@
   .galCover img{width:100%;height:100%;object-fit:cover;display:block;}
   .galTitle{font-size:13px;font-weight:700;}
   .galBook{font-size:11px;color:var(--muted);}
-
-  /* experiment card shown at the completion moment */
-  #bookCard{position:fixed;left:50%;bottom:118px;transform:translateX(-50%);display:flex;gap:12px;align-items:center;
-    background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:10px 14px;opacity:0;transition:opacity .5s;
-    pointer-events:none;z-index:5;box-shadow:0 4px 18px rgba(0,0,0,.12);}
-  #bookCard.show{opacity:1;pointer-events:auto;}
-  #bookCard .galCover{width:60px;height:60px;font-size:18px;}
-  .bcFrom{font-size:11px;color:var(--muted);}
-  .bcBook{font-size:13px;font-weight:700;max-width:240px;}
-  .bcBuy{font-size:12px;font-weight:600;color:var(--accent);text-decoration:none;}
-  .bcBuy:hover{text-decoration:underline;}
 
   /* popover panels: Plates + Create */
   #panel,#createPanel,#exportPanel{position:fixed;right:20px;bottom:64px;background:var(--surface);border:1px solid var(--border);border-radius:14px;
@@ -263,9 +248,7 @@
   <div id="loupe"><canvas id="loupeCanvas" width="380" height="380"></canvas></div>
 
   <div id="intro">Every printed picture is four colours of dots</div>
-  <div id="bookCard"></div>
   <div id="hint">Scroll to print</div>
-  <div id="done">&#10003; In register</div>
   <div id="note"></div>
 
 <script>
@@ -279,8 +262,6 @@
   const bar=document.getElementById("bar");
   const count=document.getElementById("count");
   const hint=document.getElementById("hint");
-  const done=document.getElementById("done");
-  const bookCard=document.getElementById("bookCard");
 
   /* ---------- the press ----------
      Four halftone plates at the classic screen angles. Each plate is a grid
@@ -576,21 +557,6 @@
     }
     setTitle(entry.title);
     document.title=entry.title+" · Press Check";
-    done.textContent="✓ In register — four colours, one picture";
-
-    // completion card
-    bookCard.appendChild(coverEl(entry));
-    const tx=document.createElement("div");
-    const l1=document.createElement("div");l1.className="bcFrom";l1.textContent=entry.buy?"From the book":"A new experiment";
-    const l2=document.createElement("div");l2.className="bcBook";l2.textContent=entry.book||"Press Check";
-    tx.appendChild(l1);tx.appendChild(l2);
-    if(entry.buy){
-      const a=document.createElement("a");a.className="bcBuy";a.href=entry.buy;
-      a.target="_blank";a.rel="noopener";a.textContent="Get the book";
-      tx.appendChild(a);
-    }
-    bookCard.appendChild(tx);
-    bookCard.dataset.ready="1";
 
     /* ----- the press run (all from p, rewindable) -----
        zoomed into the dots, the plates stamp down one at a time, each a
@@ -685,8 +651,6 @@
         count.textContent="Registering · "+NAMES[ri];
       }else count.textContent="In register";
 
-      done.classList.toggle("show",p>0.88);
-      bookCard.classList.toggle("show",p>0.88&&bookCard.dataset.ready==="1");
       if(p>0.9){
         hint.textContent=matchMedia("(pointer:fine)").matches?"Grab a plate ↘":"Scroll back to replay ↑";
         hint.style.opacity=1;
