@@ -583,9 +583,10 @@
       // (zero once separated, since zEff eases to 1)
       const recentre=Math.max(0,1-zEff)*(upx*UH)*0.12;
       sheet.style.transform="translateY("+recentre.toFixed(1)+"px) scale("+zEff.toFixed(4)+")";
-      // the paper isn't a layer — it melts away as the plates lift off it
-      // (fully gone by spread≈0.45, so it never lingers as a white block)
-      const paper=clamp(1-spread/0.45,0,1);
+      // the paper isn't a layer — it appears only at the very end as the
+      // plates close back together (gone the instant they start separating),
+      // so it never shows as a white block while the plates are apart
+      const paper=clamp(1-spread/0.1,0,1);
       sheet.style.background="rgba(255,255,255,"+paper.toFixed(3)+")";
       sheet.style.boxShadow="0 2px 16px rgba(17,20,24,"+(0.10*paper).toFixed(3)+")";
       const spacing=(window.innerWidth*0.24)/Math.max(0.05,zEff);
